@@ -4,45 +4,26 @@
 #include "WiFiProv.h"
 
 #define DEFAULT_POWER_MODE true
-#define DEFAULT_DIMMER_LEVEL 50
-#define DEFAULT_MOISTURE_LEVEL "Starting Up"
+#define DEFAULT_MOISTURE_MSG "Starting Up"
+#define DEFAULT_CALIBRATION_LEVEL 0
 const char *service_name = "PROV_1234";
 const char *pop = "abcd1234";
 
+const bool DEBUGMSG = false;
+
 // GPIO for push button
-#if CONFIG_IDF_TARGET_ESP32C3
 static int gpio_0 = 9;
 static int gpio_moisture = A1;
-#else
-// GPIO for virtual device
-static int gpio_0 = 0;
-static int gpio_moisture = 16;
-#endif
 
-bool dimmer_state = true;
+
 int moisture_state = 0;
 unsigned long startMillis;
 unsigned long currentMillis;
-const unsigned long period = 20000;
+const unsigned long period = 10000;
 int moisture_calibration = 0;
 
-// Function Definitions
-void updateMoisture()
-{
-    moisture_state = analogRead(gpio_moisture);
-    if (moisture_state > moisture_calibration)
-    {
-        my_device->updateAndReportParam("Moisture", "Needs a drink (✖╭╮✖)");
-        startMillis = currentMillis; // IMPORTANT to save the start time
-        // Serial.println(moisture_state); //For debug
-    }
-    else
-    {
-        my_device->updateAndReportParam("Moisture", "Saturated ;)");
-        startMillis = currentMillis; // IMPORTANT to save the start time
-        // Serial.println(moisture_state); //For debug
-    }
-}
+// Function Prototype
+void updateMoisture();
 
 // The framework provides some standard device types like switch, lightbulb, fan, temperature sensor.
 // But, you can also define custom devices using the 'Device' base class object, as shown here
@@ -85,11 +66,17 @@ void write_callback(Device *device, Param *param, const param_val_t val, void *p
     //      (dimmer_state == false) ? digitalWrite(gpio_dimmer, LOW) : digitalWrite(gpio_dimmer, HIGH);
     //      param->updateAndReport(val);
     //  }
-    //  else if (strcmp(param_name, "Level") == 0)
-    //  {
-    //      Serial.printf("\nReceived value = %d for %s - %s\n", val.val.i, device_name, param_name);
-    //      param->updateAndReport(val);
-    //  }
+    if (strcmp(param_name, "Calibration Level") == 0)
+    {
+        Serial.printf("\nReceived value = %d for %s - %s\n", val.val.i, device_name, param_name);
+        param->updateAndReport(val);
+        moisture_calibration = val.val.i;
+        if (DEBUGMSG == true)
+        {
+            Serial.println("Calibration Point: " + String(moisture_calibration)); // for DEBUGMSG
+        }
+        updateMoisture();
+    }
 }
 
 void setup()
@@ -101,22 +88,28 @@ void setup()
 
     Node my_node;
     my_node = RMaker.initNode("ESP RainMaker Node");
-    my_device = new Device("JerryFeeder5000", "custom.device.jerry", &gpio_moisture); // maybe change dimmer to moisture pin?
+    my_device = new Device("JerryFeeder5000", "custom.device.jerry", &gpio_moisture);
     if (!my_device)
     {
         return;
     }
-    // Create custom dimmer device
+
+    // Create custom device
     my_device->addNameParam();
 
-    Param moisture_param("Moisture", "custom.param.moisture", value(DEFAULT_MOISTURE_LEVEL), PROP_FLAG_READ);
+    Param moisture_param("Moisture", "custom.param.moisture", value(DEFAULT_MOISTURE_MSG), PROP_FLAG_READ);
     moisture_param.addUIType(ESP_RMAKER_UI_TEXT);
     my_device->addParam(moisture_param);
     my_device->assignPrimaryParam(my_device->getParamByName("Moisture"));
 
+    Param calibration_param("Calibration Level", "custom.param.cal", value(DEFAULT_CALIBRATION_LEVEL), PROP_FLAG_READ | PROP_FLAG_WRITE);
+    calibration_param.addUIType(ESP_RMAKER_UI_SLIDER);
+    calibration_param.addBounds(value(0), value(4000), value(1));
+    my_device->addParam(calibration_param);
+
     my_device->addCb(write_callback);
 
-    // Add custom dimmer device to the node
+    // Add custom device to the node
     my_node.addDevice(*my_device);
 
     // This is optional
@@ -172,8 +165,9 @@ void loop()
         else
         {
             moisture_state = analogRead(gpio_moisture);
-            Serial.printf("\nSet moisture wet calibration value to: \"%i\"", moisture_state);
+            Serial.printf("\nSet moisture wet calibration value to: \"%i\" \n", moisture_state);
             moisture_calibration = moisture_state;
+            my_device->updateAndReportParam("Calibration Level", moisture_calibration);
             updateMoisture();
         }
     }
@@ -184,4 +178,27 @@ void loop()
         updateMoisture();
     }
     delay(100);
+}
+
+void updateMoisture()
+{
+    moisture_state = analogRead(gpio_moisture);
+    if (moisture_state > moisture_calibration)
+    {
+        my_device->updateAndReportParam("Moisture", "Needs a drink (✖╭╮✖)");
+        startMillis = currentMillis; // IMPORTANT to save the start time
+        if (DEBUGMSG == true)
+        {
+            Serial.println("Moisture Read: " + String(moisture_state)); // For DEBUGMSG
+        }
+    }
+    else
+    {
+        my_device->updateAndReportParam("Moisture", "Saturated ;)");
+        startMillis = currentMillis; // IMPORTANT to save the start time
+        if (DEBUGMSG == true)
+        {
+            Serial.println("Moisture Read: " + String(moisture_state)); // For DEBUGMSG
+        }
+    }
 }
