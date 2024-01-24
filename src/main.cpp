@@ -1,37 +1,58 @@
-//This example demonstrates the ESP RainMaker with a custom device
+// This example demonstrates the ESP RainMaker with a custom device
 #include "RMaker.h"
 #include "WiFi.h"
 #include "WiFiProv.h"
 
-#define DEFAULT_MOISTURE_LEVEL 0
-const char *service_name = "JERRY_1";
-const char *pop = "a1d3s2";
+#define DEFAULT_POWER_MODE true
+#define DEFAULT_DIMMER_LEVEL 50
+#define DEFAULT_MOISTURE_LEVEL "Starting Up"
+const char *service_name = "PROV_1234";
+const char *pop = "abcd1234";
 
-
-//This is all setup BS
-//GPIO for sensor reading
+// GPIO for push button
 #if CONFIG_IDF_TARGET_ESP32C3
-static int sensorPin= A0;
-static int gpio_reset = D9;
+static int gpio_0 = 9;
+static int gpio_moisture = A1;
 #else
-//GPIO for virtual device
-static int sensorPin = A0;
-static int gpio_reset = D9;
+// GPIO for virtual device
+static int gpio_0 = 0;
+static int gpio_moisture = 16;
 #endif
 
-int sensorValue=0;
+bool dimmer_state = true;
+int moisture_state = 0;
+unsigned long startMillis;
+unsigned long currentMillis;
+const unsigned long period = 20000;
+int moisture_calibration = 0;
 
+// Function Definitions
+void updateMoisture()
+{
+    moisture_state = analogRead(gpio_moisture);
+    if (moisture_state > moisture_calibration)
+    {
+        my_device->updateAndReportParam("Moisture", "Needs a drink (✖╭╮✖)");
+        startMillis = currentMillis; // IMPORTANT to save the start time
+        // Serial.println(moisture_state); //For debug
+    }
+    else
+    {
+        my_device->updateAndReportParam("Moisture", "Saturated ;)");
+        startMillis = currentMillis; // IMPORTANT to save the start time
+        // Serial.println(moisture_state); //For debug
+    }
+}
 
 // The framework provides some standard device types like switch, lightbulb, fan, temperature sensor.
 // But, you can also define custom devices using the 'Device' base class object, as shown here
 static Device *my_device = NULL;
-//This is the initialization of what I care about^
 
-//This is some rainmaker Bull
 // WARNING: sysProvEvent is called from a separate FreeRTOS task (thread)!
 void sysProvEvent(arduino_event_t *sys_event)
 {
-    switch (sys_event->event_id) {
+    switch (sys_event->event_id)
+    {
     case ARDUINO_EVENT_PROV_START:
 #if CONFIG_IDF_TARGET_ESP32S2
         Serial.printf("\nProvisioning Started with name \"%s\" and PoP \"%s\" on SoftAP\n", service_name, pop);
@@ -50,62 +71,60 @@ void sysProvEvent(arduino_event_t *sys_event)
     default:;
     }
 }
-//Ignore this^
-
 
 void write_callback(Device *device, Param *param, const param_val_t val, void *priv_data, write_ctx_t *ctx)
 {
     const char *device_name = device->getDeviceName();
     const char *param_name = param->getParamName();
 
-    // if (strcmp(param_name, "Power") == 0) {
-    //     Serial.printf("Received value = %s for %s - %s\n", val.val.b ? "true" : "false", device_name, param_name);
-    //     dimmer_state = val.val.b;
-    //     (dimmer_state == false) ? digitalWrite(gpio_dimmer, LOW) : digitalWrite(gpio_dimmer, HIGH);
-    //     param->updateAndReport(val);
-    // } else if (strcmp(param_name, "Level") == 0) {
-    //     Serial.printf("\nReceived value = %d for %s - %s\n", val.val.i, device_name, param_name);
-    //     param->updateAndReport(val);
-    // }
+    // example for updating params on the fly
+    //  if (strcmp(param_name, "Power") == 0)
+    //  {
+    //      Serial.printf("Received value = %s for %s - %s\n", val.val.b ? "true" : "false", device_name, param_name);
+    //      dimmer_state = val.val.b;
+    //      (dimmer_state == false) ? digitalWrite(gpio_dimmer, LOW) : digitalWrite(gpio_dimmer, HIGH);
+    //      param->updateAndReport(val);
+    //  }
+    //  else if (strcmp(param_name, "Level") == 0)
+    //  {
+    //      Serial.printf("\nReceived value = %d for %s - %s\n", val.val.i, device_name, param_name);
+    //      param->updateAndReport(val);
+    //  }
 }
 
 void setup()
 {
     Serial.begin(115200);
-    pinMode(sensorPin, INPUT);
+    pinMode(gpio_0, INPUT);
+    pinMode(gpio_moisture, INPUT);
+    analogRead(gpio_moisture);
 
     Node my_node;
     my_node = RMaker.initNode("ESP RainMaker Node");
-    my_device = new Device("MoistureSensor", "custom.device.moisture_sensor");
-    //The juicy bits :)
-
-    if (!my_device) {
+    my_device = new Device("JerryFeeder5000", "custom.device.jerry", &gpio_moisture); // maybe change dimmer to moisture pin?
+    if (!my_device)
+    {
         return;
     }
-    //Create custom dimmer device
+    // Create custom dimmer device
     my_device->addNameParam();
-    my_device->assignPrimaryParam(my_device->getParamByName(ESP_RMAKER_DEF_POWER_NAME));
-    //This requires some further investigation ^ :D
 
-
-    //Create and add a custom level parameter
-    Param moisture_param("Moisture", "custom.param.moisture", value(DEFAULT_MOISTURE_LEVEL), PROP_FLAG_READ | PROP_FLAG_WRITE);
-    moisture_param.addBounds(value(0), value(100), value(1));
+    Param moisture_param("Moisture", "custom.param.moisture", value(DEFAULT_MOISTURE_LEVEL), PROP_FLAG_READ);
     moisture_param.addUIType(ESP_RMAKER_UI_TEXT);
-    my_device->assignPrimaryParam(my_device->getParamByName("Moisture")); //Why does this work?
-    //I like this a lot :)))))
+    my_device->addParam(moisture_param);
+    my_device->assignPrimaryParam(my_device->getParamByName("Moisture"));
 
     my_device->addCb(write_callback);
 
-    //Add custom dimmer device to the node
+    // Add custom dimmer device to the node
     my_node.addDevice(*my_device);
 
-    //This is optional
+    // This is optional
     RMaker.enableOTA(OTA_USING_TOPICS);
-    //If you want to enable scheduling, set time zone for your region using setTimeZone().
-    //The list of available values are provided here https://rainmaker.espressif.com/docs/time-service.html
-    // RMaker.setTimeZone("Asia/Shanghai");
-    // Alternatively, enable the Timezone service and let the phone apps set the appropriate timezone
+    // If you want to enable scheduling, set time zone for your region using setTimeZone().
+    // The list of available values are provided here https://rainmaker.espressif.com/docs/time-service.html
+    //  RMaker.setTimeZone("Asia/Shanghai");
+    //  Alternatively, enable the Timezone service and let the phone apps set the appropriate timezone
     RMaker.enableTZService();
 
     RMaker.enableSchedule();
@@ -114,42 +133,55 @@ void setup()
 
     RMaker.start();
 
-    WiFi.onEvent(sysProvEvent);  // Will call sysProvEvent() from another thread.
+    WiFi.onEvent(sysProvEvent); // Will call sysProvEvent() from another thread.
 #if CONFIG_IDF_TARGET_ESP32S2
     WiFiProv.beginProvision(WIFI_PROV_SCHEME_SOFTAP, WIFI_PROV_SCHEME_HANDLER_NONE, WIFI_PROV_SECURITY_1, pop, service_name);
 #else
     WiFiProv.beginProvision(WIFI_PROV_SCHEME_BLE, WIFI_PROV_SCHEME_HANDLER_FREE_BTDM, WIFI_PROV_SECURITY_1, pop, service_name);
 #endif
+
+    startMillis = millis();
 }
 
 void loop()
 {
-    if (digitalRead(gpio_reset) == LOW) { //Push button pressed
+    if (digitalRead(gpio_0) == LOW)
+    { // Push button pressed
 
         // Key debounce handling
         delay(100);
         int startTime = millis();
-        while (digitalRead(gpio_reset) == LOW) {
+        while (digitalRead(gpio_0) == LOW)
+        {
             delay(50);
         }
         int endTime = millis();
 
-        if ((endTime - startTime) > 10000) {
+        if ((endTime - startTime) > 10000)
+        {
             // If key pressed for more than 10secs, reset all
             Serial.printf("Reset to factory.\n");
             RMakerFactoryReset(2);
-        } else if ((endTime - startTime) > 3000) {
+        }
+        else if ((endTime - startTime) > 3000)
+        {
             Serial.printf("Reset Wi-Fi.\n");
             // If key pressed for more than 3secs, but less than 10, reset Wi-Fi
             RMakerWiFiReset(2);
-        } else {
-            //Monkeying Around
-            sensorValue = analogRead(sensorPin);
-            Serial.printf("Moisture Value @ " + sensorValue);
-            if (my_device) {
-                my_device->updateAndReportParam("Moisture", sensorValue);
-            }
         }
+        else
+        {
+            moisture_state = analogRead(gpio_moisture);
+            Serial.printf("\nSet moisture wet calibration value to: \"%i\"", moisture_state);
+            moisture_calibration = moisture_state;
+            updateMoisture();
+        }
+    }
+
+    currentMillis = millis();                  // get the current "time" (actually the number of milliseconds since the program started)
+    if (currentMillis - startMillis >= period) // test whether the period has elapsed
+    {
+        updateMoisture();
     }
     delay(100);
 }
