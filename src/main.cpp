@@ -6,6 +6,7 @@
 #define DEFAULT_POWER_MODE true
 #define DEFAULT_MOISTURE_MSG "Starting Up"
 #define DEFAULT_CALIBRATION_LEVEL 0
+#define DEFAULT_MOISTURE_READ 0
 const char *service_name = "PROV_1234";
 const char *pop = "abcd1234";
 
@@ -102,6 +103,10 @@ void setup()
     my_device->addParam(moisture_param);
     my_device->assignPrimaryParam(my_device->getParamByName("Moisture"));
 
+    Param data_param("Moisture Reading", "custom.param.data", value(DEFAULT_MOISTURE_READ), PROP_FLAG_READ);
+    moisture_param.addUIType(ESP_RMAKER_UI_TEXT);
+    my_device->addParam(data_param);
+
     Param calibration_param("Calibration Level", "custom.param.cal", value(DEFAULT_CALIBRATION_LEVEL), PROP_FLAG_READ | PROP_FLAG_WRITE);
     calibration_param.addUIType(ESP_RMAKER_UI_SLIDER);
     calibration_param.addBounds(value(0), value(4000), value(1));
@@ -176,6 +181,7 @@ void loop()
     if (currentMillis - startMillis >= period) // test whether the period has elapsed
     {
         updateMoisture();
+        startMillis = currentMillis; // IMPORTANT to save the start time
     }
     delay(100);
 }
@@ -186,7 +192,7 @@ void updateMoisture()
     if (moisture_state > moisture_calibration)
     {
         my_device->updateAndReportParam("Moisture", "Needs a drink (✖╭╮✖)");
-        startMillis = currentMillis; // IMPORTANT to save the start time
+        my_device->updateAndReportParam("Moisture Reading", moisture_state);
         if (DEBUGMSG == true)
         {
             Serial.println("Moisture Read: " + String(moisture_state)); // For DEBUGMSG
@@ -195,7 +201,7 @@ void updateMoisture()
     else
     {
         my_device->updateAndReportParam("Moisture", "Saturated ;)");
-        startMillis = currentMillis; // IMPORTANT to save the start time
+        my_device->updateAndReportParam("Moisture Reading", moisture_state);
         if (DEBUGMSG == true)
         {
             Serial.println("Moisture Read: " + String(moisture_state)); // For DEBUGMSG
